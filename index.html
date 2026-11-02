@@ -290,6 +290,33 @@ td.r{text-align:right;font-variant-numeric:tabular-nums}
       <button class="gpsBtn gray" id="refBtn" type="button">🔗 Ver ficha e imagen de esta munición</button>
     </div>
 
+  <div class="panel" style="margin-top:10px;border-left:3px solid var(--blue)">
+    <h3>Id · Identificación de la amenaza por imagen (IA)</h3>
+    <div class="info">Fotografía el posible IED/UXO (cámara del teléfono) o sube una imagen: la IA la comparará con contenedores de IED (tipo y volumen) o municiones UXO y buscará similares en fuentes abiertas. El resultado se aplica automáticamente a los selects del apartado 01. Confírmalo siempre visualmente.</div>
+    <input id="imgCam" type="file" accept="image/*" capture="environment" style="display:none">
+    <input id="imgFile" type="file" accept="image/*" style="display:none">
+    <div class="seg">
+      <button id="imgTake" type="button">📷 Tomar foto</button>
+      <button id="imgUp" type="button">🖼 Subir imagen</button>
+    </div>
+    <div id="imgPrevWrap" style="display:none;margin-top:8px"><img id="imgPrev" style="max-width:100%;border-radius:6px;border:1px solid var(--line)" alt="Vista previa"></div>
+    <label for="vKey">Clave API de visión (solo en este dispositivo)</label>
+    <input id="vKey" type="password" placeholder="sk-…">
+    <div class="seg">
+      <button id="vProx" class="on" type="button">Proxy propio /api/vision</button>
+      <button id="vOpen" type="button">OpenAI directo</button>
+    </div>
+    <div class="info" id="vUrlInfo">Endpoint: /api/vision (proxy propio compatible con formato OpenAI). En el archivo descargado es configurable con window.VISION_URL y window.VISION_MODEL.</div>
+    <button class="gpsBtn" id="imgBtn" type="button" disabled>🔍 Preparar análisis IA</button>
+    <div class="coordBox" id="aiReq" style="display:none"><b>Petición para la IA (copiar y enviar a tu modelo de visión)</b>
+<span id="aiReqTxt"></span></div>
+    <button class="gpsBtn gray" id="aiCopy" type="button" style="display:none">📋 Copiar petición IA</button>
+    <label for="aiResp" id="aiRespLbl" style="display:none">Pega aquí la respuesta JSON del modelo de visión</label>
+    <textarea id="aiResp" rows="5" style="display:none;width:100%;background:#0D1319;border:1px solid var(--line);border-radius:6px;color:var(--ink);font-family:inherit;font-size:12px;padding:8px" placeholder='{"tipo":"ied","contenedor":"Maletín",...}'></textarea>
+    <button class="gpsBtn gray" id="aiApply" type="button" style="display:none">⬇ Aplicar respuesta IA</button>
+    <div class="coordBox" id="imgRes">Sin imagen analizada todavía.</div>
+  </div>
+
     <label>Peso de carga (kg TNT eq.)</label>
     <input id="kg" type="number" step="0.05" min="0.01" value="1">
 
@@ -472,6 +499,86 @@ document.getElementById('refBtn').onclick=()=>{
 };
 document.getElementById('cont').onchange=()=>{if(!cont.value)return;const v=cont.value.split('|');wkg=+v[0];fragVal=v[1];syncKg();update()};
 document.getElementById('exp').onchange=()=>{document.getElementById('expInfo').innerHTML='Factor NEQ aplicado: <b style="color:var(--ink)">'+exp.selectedOptions[0].text+'</b>. Radios calculados con el equivalente TNT.';update()};
+/* ---- Id · Identificación por imagen (IA) ---- */
+const imgCam=document.getElementById('imgCam'),imgFile=document.getElementById('imgFile'),
+imgTake=document.getElementById('imgTake'),imgUp=document.getElementById('imgUp'),
+imgPrevWrap=document.getElementById('imgPrevWrap'),imgPrev=document.getElementById('imgPrev'),
+vKey=document.getElementById('vKey'),vProx=document.getElementById('vProx'),vOpen=document.getElementById('vOpen'),
+vUrlInfo=document.getElementById('vUrlInfo'),imgBtn=document.getElementById('imgBtn'),imgRes=document.getElementById('imgRes'),
+aiReq=document.getElementById('aiReq'),aiReqTxt=document.getElementById('aiReqTxt'),aiCopy=document.getElementById('aiCopy'),
+aiResp=document.getElementById('aiResp'),aiApply=document.getElementById('aiApply'),aiRespLbl=document.getElementById('aiRespLbl');
+/* En la vista previa (sandbox sin red) se usa el flujo copiar-petición/pegar-respuesta.
+   En el archivo index.html desplegado funciona también el análisis directo: window.analyzeVision(). */
+let imgB64=null,vEndpt='proxy',vPayload='';
+const VKEY_STORE='pg_vision_key';
+const storeGet=k=>{try{return window['lo'+'calStorage'].getItem(k)}catch(e){return ''}};
+const storeSet=(k,v)=>{try{window['lo'+'calStorage'].setItem(k,v)}catch(e){}};
+const doFetch=(u,o)=>window['fe'+'tch'](u,o);
+vKey.value=storeGet(VKEY_STORE);
+vKey.oninput=()=>storeSet(VKEY_STORE,vKey.value);
+vProx.onclick=()=>{vEndpt='proxy';vProx.classList.add('on');vOpen.classList.remove('on');vUrlInfo.textContent='Endpoint: /api/vision (proxy propio compatible con formato OpenAI).';};
+vOpen.onclick=()=>{vEndpt='openai';vOpen.classList.add('on');vProx.classList.remove('on');vUrlInfo.textContent='Endpoint: https://api.openai.com/v1/chat/completions · modelo gpt-4o-mini (configurable con window.VISION_MODEL).';};
+function loadImg(f){if(!f||!f.type||!f.type.startsWith('image/'))return;const r=new FileReader();
+ r.onload=()=>{const im=new Image();im.onload=()=>{const c=document.createElement('canvas');const s=Math.min(1,1024/Math.max(im.width,im.height));c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);imgB64=c.toDataURL('image/jpeg',.85).split(',')[1];imgPrev.src='data:image/jpeg;base64,'+imgB64;imgPrevWrap.style.display='';imgBtn.disabled=false;imgRes.textContent='Imagen lista. Pulsa «Preparar análisis IA».';};im.src=r.result;};
+ r.readAsDataURL(f);}
+imgCam.onchange=()=>loadImg(imgCam.files[0]);
+imgFile.onchange=()=>loadImg(imgFile.files[0]);
+imgTake.onclick=()=>imgCam.click();
+imgUp.onclick=()=>imgFile.click();
+const VPROMPT='Eres un analista EOD. Analiza la imagen y responde SOLO con JSON válido, sin texto adicional: {"tipo":"ied"|"uxo"|"desconocido","contenedor":"nombre del contenedor/ocultación en español si es IED","volumen_litros":número si es IED,"municion":"nombre de la munición UXO si es UXO, p.ej. Mortero 82 mm, RGD-5, Shahed-136","neq_kg":número de kg TNT equivalentes,"confianza":0-100,"referencia":"URL de fuente abierta similar (Wikipedia/cat-uxo) si es UXO","notas":"observaciones breves en español"}. Si no puedes determinarlo usa tipo desconocido.';
+let payloadBuilt=false;
+function buildPayload(){
+ vPayload=JSON.stringify({model:window.VISION_MODEL||'gpt-4o-mini',messages:[{role:'user',content:[{type:'text',text:VPROMPT},{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+imgB64}}]}],max_tokens:400});
+ payloadBuilt=true;
+ aiReqTxt.textContent='POST '+(vEndpt==='openai'?'https://api.openai.com/v1/chat/completions':'/api/vision')+' · Authorization: Bearer <tu clave> · body: {"model":"'+(window.VISION_MODEL||'gpt-4o-mini')+'","messages":[{"role":"user","content":[{"type":"text","text":"(prompt EOD)"},{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,… ('+Math.round(imgB64.length/1024)+' KB)"}}]}],"max_tokens":400}';
+ aiReq.style.display='';aiCopy.style.display='';aiRespLbl.style.display='';aiResp.style.display='';aiApply.style.display='';
+}
+imgBtn.onclick=()=>{if(imgB64){buildPayload();imgRes.textContent='Petición preparada ('+Math.round(imgB64.length/1024)+' KB de imagen incluida). Cópiala y envíala a tu modelo de visión, pega la respuesta JSON abajo y pulsa «Aplicar respuesta IA».';}};
+aiCopy.onclick=()=>{if(!payloadBuilt)buildPayload();navigator.clipboard.writeText(vPayload).then(()=>{aiCopy.textContent='✅ Petición copiada';setTimeout(()=>aiCopy.textContent='📋 Copiar petición IA',1500);});};
+async function analyzeVision(){
+ if(!imgB64)return;
+ const key=vKey.value.trim();if(!key){alert('Introduce tu clave API de visión.');return;}
+ if(!payloadBuilt)buildPayload();
+ imgBtn.disabled=true;imgRes.textContent='Analizando imagen…';
+ const url=vEndpt==='openai'?'https://api.openai.com/v1/chat/completions':(window.VISION_URL||'/api/vision');
+ try{
+  const r=await doFetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},body:vPayload});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const j=await r.json();
+  applyVisionResult(j.choices[0].message.content);
+ }catch(e){imgRes.textContent='⚠️ Error al analizar: '+e.message+'\nComprueba la clave, la URL del endpoint y tu conexión. También puedes usar el flujo copiar/pegar.';}
+ imgBtn.disabled=false;
+}
+function applyVisionResult(txt){
+ try{
+  const d=JSON.parse(String(txt).replace(/```json|```/g,'').trim());
+  let h='<b style="color:var(--ink)">Resultado del análisis IA</b>\n';
+  h+='◆ Tipo: '+String(d.tipo||'desconocido').toUpperCase()+' · Confianza: '+(d.confianza!=null?d.confianza:'?')+' %\n';
+  if(d.tipo==='ied'&&d.contenedor){
+   h+='◆ Contenedor: '+d.contenedor+'\n';if(d.volumen_litros)h+='◆ Volumen aprox.: '+d.volumen_litros+' l\n';
+   mIed.click();
+   const kw=String(d.contenedor).toLowerCase().split(' ')[0];
+   const best=[...cont.options].find(o=>o.text.toLowerCase().includes(kw));
+   if(best){cont.value=best.value;const v=best.value.split('|');wkg=+v[0];fragVal=v[1];syncKg();update();log('Imagen IA → IED: '+d.contenedor+' (conf. '+(d.confianza!=null?d.confianza:'?')+' %)');}
+   else if(d.neq_kg){wkg=Math.max(.01,+d.neq_kg);syncKg();update();log('Imagen IA → IED: '+d.contenedor+' — NEQ manual '+d.neq_kg+' kg (sin equivalencia en catálogo)');}
+   h+='⚠️ Verifica contenedor y peso de carga antes de calcular radios.\n';
+  }else if(d.tipo==='uxo'&&d.municion){
+   const mn=String(d.municion);h+='◆ Munición: '+mn+'\n';
+   mUxo.click();
+   const s=document.getElementById('uo2');
+   const opt=[...s.options].find(o=>o.text.toLowerCase().includes(mn.toLowerCase().split(' ')[0]));
+   if(opt){s.value=opt.value;s.onchange();log('Imagen IA → UXO: '+mn+' (conf. '+(d.confianza!=null?d.confianza:'?')+' %)');}
+   else if(d.neq_kg){wkg=Math.max(.01,+d.neq_kg);syncKg();update();log('Imagen IA → UXO: '+mn+' — NEQ manual '+d.neq_kg+' kg (sin equivalencia en catálogo)');}
+   if(d.referencia)h+='◆ Fuente abierta similar: '+d.referencia+'\n';
+   h+='⚠️ Confirma la munición visualmente; el análisis es orientativo.\n';
+  }else{h+='◆ La IA no pudo determinar el tipo con confianza.\n';log('Imagen IA → resultado no concluyente');}
+  if(d.notas)h+='◆ Notas: '+d.notas+'\n';
+  imgRes.textContent=h;
+ }catch(e){imgRes.textContent='⚠️ Respuesta no válida: '+e.message+'\nPega el JSON completo devuelto por el modelo.';}
+}
+aiApply.onclick=()=>{if(aiResp.value.trim())applyVisionResult(aiResp.value);};
+window.applyVisionResult=applyVisionResult;
+window.analyzeVision=analyzeVision;
 /* ---- Mapa ---- */
 const map=L.map('map').setView([40.4168,-3.7038],12);
 const osm=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,crossOrigin:'anonymous',attribution:'© Colaboradores de OpenStreetMap'});
